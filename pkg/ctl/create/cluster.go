@@ -287,6 +287,7 @@ func doCreateCluster(rc *cmdutils.ResourceCmd, params *createClusterCmdParams) e
 		}
 		logger.Info("if you encounter any issues, check CloudFormation console or try 'eksctl utils describe-stacks --region=%s --name=%s'", meta.Region, meta.Name)
 		tasks := stackManager.NewTasksToCreateClusterWithNodeGroups(ngSubset)
+		tasks.Append(ctl.UpdateClusterConfigTasks(cfg))
 		logger.Info(tasks.Describe())
 		if errs := tasks.DoAllSync(); len(errs) > 0 {
 			logger.Info("%d error(s) occurred and cluster hasn't been created properly, you may wish to check CloudFormation console", len(errs))
@@ -319,13 +320,6 @@ func doCreateCluster(rc *cmdutils.ResourceCmd, params *createClusterCmdParams) e
 			logger.Success("saved kubeconfig as %q", params.kubeconfigPath)
 		} else {
 			params.kubeconfigPath = ""
-		}
-
-		if len(cfg.EnableLogging) > 0 {
-			logger.Info("updating cluster configuration for logging (enabling facilities: %s)", strings.Join(cfg.EnableLogging, ", "))
-			if err := ctl.UpdateClusterConfigForLogging(cfg); err != nil {
-				return err
-			}
 		}
 
 		// create Kubernetes client

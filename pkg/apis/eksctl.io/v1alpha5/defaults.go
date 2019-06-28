@@ -1,12 +1,15 @@
 package v1alpha5
 
+func SupportedLoggingFacilities() []string {
+	return []string{"api", "audit", "authenticator", "controllerManager", "scheduler"}
+}
+
 // SetClusterConfigDefaults will set defaults for a given cluster
 func SetClusterConfigDefaults(cfg *ClusterConfig) error {
-	logAll := []string{"api", "audit", "authenticator", "controllerManager", "scheduler"}
 	if len(cfg.EnableLogging) == 1 {
 		switch cfg.EnableLogging[0] {
 		case "all", "*":
-			cfg.EnableLogging = logAll
+			cfg.EnableLogging = SupportedLoggingFacilities()
 		}
 	}
 	return nil

@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha5"
+	"github.com/weaveworks/eksctl/pkg/cfn/manager"
 	"github.com/weaveworks/eksctl/pkg/printers"
 	"github.com/weaveworks/eksctl/pkg/utils/waiters"
 	"github.com/weaveworks/eksctl/pkg/vpc"
@@ -229,20 +230,52 @@ func (c *ClusterProvider) WaitForControlPlane(id *api.ClusterMeta, clientSet *ku
 	}
 }
 
+type updateClusterConfigTask struct {
+	info string
+	spec *api.ClusterConfig
+	call func(*api.ClusterConfig) error
+}
+
+func (t *updateClusterConfigTask) Describe() string { return t.info }
+func (t *updateClusterConfigTask) Do(errs chan error) error {
+	err := t.call(t.spec)
+	close(errs)
+	return err
+}
+
 // UpdateClusterConfigForLogging calls UpdateClusterConfig to enable logging
 func (c *ClusterProvider) UpdateClusterConfigForLogging(cfg *api.ClusterConfig) error {
-	if len(cfg.EnableLogging) == 0 {
-		return nil
+	var enabled, disabled []string
+	for _, facility := range api.SupportedLoggingFacilities() {
+		isEnabled := false
+		for _, enabledFacility := range cfg.EnableLogging {
+			isEnabled = facility == enabledFacility
+		}
+		if isEnabled {
+			enabled = append(enabled, facility)
+		} else {
+			disabled = append(disabled, facility)
+		}
 	}
+
+	logger.Info("updating cluster configuration for logging (enabled facilities: %s)", strings.Join(cfg.EnableLogging, ", "))
+
 	input := &awseks.UpdateClusterConfigInput{
 		Name: &cfg.Metadata.Name,
 		Logging: &awseks.Logging{
-			ClusterLogging: []*awseks.LogSetup{{
-				Enabled: aws.Bool(true),
-				Types:   aws.StringSlice(cfg.EnableLogging),
-			}},
+			ClusterLogging: []*awseks.LogSetup{
+				{
+					Enabled: api.Enabled(),
+					Types:   aws.StringSlice(enabled),
+				},
+				{
+					Enabled: api.Disabled(),
+					Types:   aws.StringSlice(disabled),
+				},
+			},
 		},
 	}
+
 	output, err := c.Provider.EKS().UpdateClusterConfig(input)
 	if err != nil {
 		return err
@@ -251,6 +284,19 @@ func (c *ClusterProvider) UpdateClusterConfigForLogging(cfg *api.ClusterConfig) 
 		return err
 	}
 	return nil
+}
+
+// UpdateClusterConfigTasks returns all tasks for updating cluster configuration
+func (c *ClusterProvider) UpdateClusterConfigTasks(cfg *api.ClusterConfig) *manager.TaskTree {
+	tasks := &manager.TaskTree{Parallel: false}
+
+	tasks.Append(&updateClusterConfigTask{
+		info: "update cluster logging configurtaion",
+		spec: cfg,
+		call: c.UpdateClusterConfigForLogging,
+	})
+
+	return tasks
 }
 
 // UpdateClusterVersion calls eks.UpdateClusterVersion and updates to cfg.Metadata.Version,
